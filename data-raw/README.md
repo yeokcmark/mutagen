@@ -1,1 +1,0 @@
-The model fitting code in `source/fit.R` saves large objects to this folder. Besides this file, the contents of the folder are `.gitignore`d---this file only exists to enable tracking the folder.
