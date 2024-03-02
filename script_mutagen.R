@@ -1,6 +1,6 @@
 rm(list=ls())
 pacman::p_load("tidyverse", #for tidy data science practice
-               "tidymodels", "workflows", "finetune", "themis", "embed",# for tidy machine learning
+               "tidymodels", "workflows", "finetune", "themis", "embed", "butcher",# for tidy machine learning
                "pacman", #package manager
                "devtools", #developer tools
                "Hmisc", "skimr", "broom", "modelr",#for EDA
@@ -63,7 +63,7 @@ rf_spec <-
   set_engine("ranger",
              importance = "impurity") %>% 
   set_mode("classification") %>% 
-  set_args(trees = 1000L,
+  set_args(trees = tune(),
            mtry = tune(),
            min_n = tune())
 
@@ -120,5 +120,56 @@ racing_results <-
                                       allow_par = TRUE,
                                       #save_workflow = TRUE,
                                       parallel_over = "everything"))
-racing_results %>% autoplot()
+
+
+autoplot(racing_results) + theme_bw() + theme(legend.position = "bottom")
+
+racing_results %>% 
+  workflowsets::rank_results(rank_metric = "roc_auc") %>% 
+  filter(.metric == "roc_auc") %>% 
+  dplyr::select(wflow_id, mean, std_err, rank) %>% 
+  datatable() %>% 
+  formatRound(columns = c("mean", "std_err"),
+              digits = 3)
+
+# tune base_rf using tune_grid
+
+base_rf_wflow <-
+  workflow() %>% 
+  add_model(rf_spec) %>% 
+  add_recipe(base_rec)
+
+rf_grid <-
+  extract_parameter_set_dials(rf_spec) %>% 
+  update(trees = trees(c(500L,2000L)),
+         mtry = mtry(c(25L,55L)),
+         min_n = min_n(c(5L,20L)
+                       )
+         )
+
+rf_metrics <-
+  metric_set(roc_auc, f_meas, accuracy, mn_log_loss)
+  
+# tune_sim_anneal
+
+set.seed(2024030303)
+ncores <- detectCores() - 1
+cl <- makePSOCKcluster(ncores)
+doParallel::registerDoParallel()
+
+base_rf_sim_anneal_result <-
+  tune_sim_anneal(
+    object = base_rf_wflow,
+    resamples = data_fold,
+    iter = 25,
+    metrics = rf_metrics,
+    param_info = rf_grid,
+    initial = 1,
+    control = control_sim_anneal(verbose = TRUE,
+                                 verbose_iter = TRUE,
+                                 allow_par = TRUE,
+                                 parallel_over = "everything")
+  )
+
+
 save.image("mutagen_results.RData")
