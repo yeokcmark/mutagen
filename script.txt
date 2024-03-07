@@ -1,6 +1,6 @@
 rm(list=ls())
 pacman::p_load("tidyverse", #for tidy data science practice
-               "tidymodels", "workflows", "finetune", "themis", "embed", "butcher",# for tidy machine learning
+               "tidymodels", "workflows", "finetune", "themis", "embed",# for tidy machine learning
                "pacman", #package manager
                "devtools", #developer tools
                "Hmisc", "skimr", "broom", "modelr",#for EDA
@@ -63,7 +63,7 @@ rf_spec <-
   set_engine("ranger",
              importance = "impurity") %>% 
   set_mode("classification") %>% 
-  set_args(trees = tune(),
+  set_args(trees = 1000L,
            mtry = tune(),
            min_n = tune())
 
@@ -106,6 +106,8 @@ base_set <-
 
 # tune hyper parameters
 set.seed(2024030302)
+ncores <- detectCores() - 1
+cl <- makePSOCKcluster(ncores)
 doParallel::registerDoParallel(cl)
 
 racing_results <-
@@ -116,11 +118,10 @@ racing_results <-
                control = control_race(verbose = TRUE,
                                       verbose_elim = TRUE,
                                       allow_par = TRUE,
-                                      save_workflow = FALSE,
+                                      #save_workflow = TRUE,
                                       parallel_over = "everything"))
 
-save(racing_results, file = "racing_results.Rda")
-butcher(racing_results, verbose = TRUE)
+
 autoplot(racing_results) + theme_bw() + theme(legend.position = "bottom")
 
 racing_results %>% 
@@ -131,61 +132,34 @@ racing_results %>%
   formatRound(columns = c("mean", "std_err"),
               digits = 3)
 
-# extract best parameters
-rf_tuned_parameters <-
+base_rf_results <- 
   racing_results %>% 
-  extract_workflow_set_result(id = "basic_rand_forest") %>% 
-  select_best(metric = "roc_auc")
+  extract_workflow_set_result("basic_rand_forest")
 
+## base rf workflow
 base_rf_wflow <-
-  workflow() %>% 
-  add_model(rf_spec) %>% 
-  add_recipe(base_rec)
+  racing_results %>% 
+  extract_workflow("basic_rand_forest")
 
-# set up new search grid
-
-rf_grid <-
-  extract_parameter_set_dials(rf_spec) %>% 
-  update(trees = trees(c(500L,2000L)),
-         mtry = mtry(c(1000L,1500L)),
-         min_n = min_n(c(5L,20L)
-                       )
-         )
-
-rf_metrics <-
-  metric_set(roc_auc, f_meas, accuracy, mn_log_loss)
-  
 # tune_sim_anneal
 
 set.seed(2024030303)
-
-doParallel::registerDoParallel(cl=15, cores = 30)
+ncores <- detectCores() - 1
+cl <- makePSOCKcluster(ncores)
+doParallel::registerDoParallel(cl)
 
 base_rf_sim_anneal_result <-
   tune_sim_anneal(
     object = base_rf_wflow,
     resamples = data_fold,
     iter = 25,
-    metrics = rf_metrics,
-    param_info = rf_grid,
-    initial = 1,
+    metrics = metric_set(roc_auc, f_meas, accuracy, mn_log_loss),
+    initial = base_rf_results,
     control = control_sim_anneal(verbose = TRUE,
                                  verbose_iter = TRUE,
                                  allow_par = TRUE,
                                  parallel_over = "everything")
   )
-base_rf_sim_anneal_result %>%
-  unnest(.metrics) %>% 
-  filter(.metric =="roc_auc") %>% 
-  arrange(desc(.estimate))
-
-base_rf_sim_anneal_result %>% 
-  select_best(metric = "roc_auc")
-
-base_rf_sim_anneal_result %>% 
-  collect_metrics(summarize = FALSE) %>% 
-  filter(.metric =="roc_auc") %>% 
-  arrange(desc(.estimate))
 
 
 save.image("mutagen_results.RData")

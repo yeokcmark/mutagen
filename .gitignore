@@ -6,5 +6,8 @@
 data-raw/*
 !data-raw/README.md
 kazius2005_mutagen.pdf
-
 /.quarto/
+mutagen_results.RData
+racing_results.Rda
+.RDataTmp
+.RDataTmp1
